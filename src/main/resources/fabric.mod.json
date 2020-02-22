@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "tn-replay",
+  "version": "${version}",
+
+  "name": "Totally Not Replay Mod",
+  "description": "This is an example description! Tell everyone what your mod is about!",
+  "authors": [
+    "skyrising"
+  ],
+  "contact": {
+    "homepage": "https://skyrising.xyz",
+    "sources": "https://github.com/skyrising/totally-not-replay-mod"
+  },
+
+  "license": "MIT",
+  "icon": "assets/modid/icon.png",
+
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "de.skyrising.replay.TotallyNotReplayMod"
+    ]
+  },
+  "mixins": [
+    "replay.mixins.json"
+  ],
+
+  "depends": {
+    "fabricloader": ">=0.7.2",
+    "minecraft": "1.15.x"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "package": "de.skyrising.replay.mixin",
+  "compatibilityLevel": "JAVA_8",
+  "mixins": [
+    "accessors.ChunkDataS2CPacketAccessor",
+    "accessors.ChunkDeltaUpdateS2CPacketAccessor"
+  ],
+  "client": [
+    "ClientConnectionMixin",
+    "TitleScreenMixin",
+    "accessors.MinecraftClientAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
