@@ -2,6 +2,7 @@ package de.skyrising.replay.recording;
 
 import com.google.gson.JsonObject;
 import de.skyrising.replay.TotallyNotReplayMod;
+import de.skyrising.replay.Utils;
 import de.skyrising.replay.event.CompressionSettingEvent;
 import de.skyrising.replay.event.Event;
 import de.skyrising.replay.event.MetadataEvent;
@@ -117,22 +118,8 @@ public class Recording extends ReplayContext implements AutoCloseable {
         onEvent(e);
         PacketByteBuf encoded = encode(e);
         PacketByteBuf framed = new PacketByteBuf(Unpooled.buffer(encoded.writerIndex() + 10));
-        if (compressionSettings != null && allowCompression && compressionSettings.getCompressionType() != CompressionSettingEvent.CompressionType.NONE) {
-            int uncompressedSize = encoded.writerIndex();
-            byte[] bytes = encoded.array();
-            byte[] compressed = new byte[uncompressedSize];
-            int compressedSize;
-            switch (compressionSettings.getCompressionType()) {
-                case ZLIB: {
-                    deflater.setInput(bytes, 0, uncompressedSize);
-                    compressedSize = deflater.deflate(compressed, 0, compressed.length, Deflater.SYNC_FLUSH);
-                    break;
-                }
-                default: throw new UnsupportedOperationException();
-            }
-            framed.writeVarInt(uncompressedSize);
-            framed.writeVarInt(compressedSize);
-            framed.writeBytes(compressed, 0, compressedSize);
+        if (shouldCompress(encoded, allowCompression)) {
+            writeCompressedEvent(encoded, framed);
         } else {
             framed.writeVarInt(encoded.writerIndex());
             framed.writeVarInt(0);
@@ -145,6 +132,33 @@ public class Recording extends ReplayContext implements AutoCloseable {
         }
         offset += framed.writerIndex();
         framed.release();
+    }
+
+    private boolean shouldCompress(PacketByteBuf encoded, boolean allowCompression) {
+        if (!allowCompression || compressionSettings == null) return false;
+        return compressionSettings.getCompressionType() != CompressionSettingEvent.CompressionType.NONE;
+    }
+
+    private void writeCompressedEvent(PacketByteBuf encoded, PacketByteBuf framed) {
+        int uncompressedSize = encoded.writerIndex();
+        byte[] bytes = encoded.array();
+        byte[] compressed = new byte[uncompressedSize];
+        int compressedSize;
+        switch (compressionSettings.getCompressionType()) {
+            case ZLIB: {
+                deflater.setInput(bytes, 0, uncompressedSize);
+                compressedSize = deflater.deflate(compressed, 0, compressed.length, Deflater.SYNC_FLUSH);
+                while (compressedSize == compressed.length) {
+                    compressed = Utils.resize(compressed, compressedSize * 2);
+                    compressedSize += deflater.deflate(compressed, compressedSize, compressed.length - compressedSize, Deflater.SYNC_FLUSH);
+                }
+                break;
+            }
+            default: throw new UnsupportedOperationException();
+        }
+        framed.writeVarInt(uncompressedSize);
+        framed.writeVarInt(compressedSize);
+        framed.writeBytes(compressed, 0, compressedSize);
     }
 
     @Override

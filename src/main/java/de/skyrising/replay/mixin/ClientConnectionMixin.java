@@ -33,7 +33,7 @@ public abstract class ClientConnectionMixin extends SimpleChannelInboundHandler<
 
     @Inject(method = "channelActive", at = @At("HEAD"))
     private void onActive(ChannelHandlerContext channelHandlerContext, CallbackInfo ci) {
-        if (Recording.isPinging((ClientConnection) (Object) this)) return;
+        if (!Recording.shouldRecord((ClientConnection) (Object) this)) return;
         Recording.clientRecording = new Recording(new RecordingSettings());
         try {
             Recording.clientRecording.start();

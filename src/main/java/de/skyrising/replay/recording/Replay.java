@@ -4,10 +4,13 @@ import de.skyrising.replay.Utils;
 import de.skyrising.replay.event.Event;
 import de.skyrising.replay.event.MetadataEvent;
 import de.skyrising.replay.mixin.accessors.MinecraftClientAccessor;
+import de.skyrising.replay.world.ReplayConnection;
 import de.skyrising.replay.world.ReplayNetworkHandler;
 import io.netty.buffer.Unpooled;
 import net.minecraft.Bootstrap;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ConnectScreen;
+import net.minecraft.client.network.ClientLoginNetworkHandler;
 import net.minecraft.util.PacketByteBuf;
 
 import javax.annotation.Nullable;
@@ -15,6 +18,8 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.ArrayDeque;
+import java.util.Queue;
 import java.util.function.Consumer;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
@@ -23,6 +28,7 @@ public class Replay extends ReplayContext implements AutoCloseable {
     private final File filePath;
     private final RandomAccessFile file;
     private Inflater inflater;
+    private Queue<Event> buffered = new ArrayDeque<>();
 
     public Replay(File file, String mode) throws FileNotFoundException {
         this.filePath = file;
@@ -43,8 +49,7 @@ public class Replay extends ReplayContext implements AutoCloseable {
 
     public void load() {
         MinecraftClient client = MinecraftClient.getInstance();
-        ReplayNetworkHandler netHandler = new ReplayNetworkHandler(client, client.currentScreen, this);
-        ((MinecraftClientAccessor) client).setClientConnection(netHandler.getConnection());
+        ((MinecraftClientAccessor) client).setClientConnection(new ReplayConnection(this, client.currentScreen));
     }
 
     public boolean hasNext() throws IOException {
@@ -61,38 +66,41 @@ public class Replay extends ReplayContext implements AutoCloseable {
         byte[] compressedBuffer = new byte[compressedLength];
         file.readFully(compressedBuffer);
         byte[] uncompressed;
-        if (compressed && compressionSettings != null) {
-            switch (compressionSettings.getCompressionType()) {
-                case ZLIB: {
-                    uncompressed = new byte[length];
-                    inflater.setInput(compressedBuffer);
-                    try {
-                        int uncompressedLength = inflater.inflate(uncompressed);
-                        if (uncompressedLength != length) {
-                            System.err.println("Uncompressed length is incorrect (" + uncompressedLength + " actual vs. " + length +")");
-                            uncompressed = Utils.resize(uncompressed, uncompressedLength);
-                            if (uncompressedLength > length) {
-                                inflater.inflate(uncompressed, length, uncompressedLength - length);
-                            }
-                        }
-                    } catch (DataFormatException e) {
-                        throw new IOException(e);
-                    }
-                    break;
-                }
-                default: {
-                    uncompressed = compressedBuffer;
-                }
-            }
-        } else {
-            uncompressed = compressedBuffer;
-        }
+        uncompressed = decompress(length, compressed, compressedBuffer);
         PacketByteBuf buf = new PacketByteBuf(Unpooled.wrappedBuffer(uncompressed));
         try {
             return Event.read(networkState, buf);
+        } catch (RuntimeException e) {
+            buf.resetReaderIndex();
+            System.err.println(Utils.hexdump(buf));
+            throw e;
         } finally {
             buf.release();
         }
+    }
+
+    private byte[] decompress(int length, boolean compressed, byte[] compressedBuffer) throws IOException {
+        if (!compressed || compressionSettings == null) return compressedBuffer;
+        switch (compressionSettings.getCompressionType()) {
+            case ZLIB: {
+                byte[] uncompressed = new byte[length];
+                inflater.setInput(compressedBuffer);
+                try {
+                    int uncompressedLength = inflater.inflate(uncompressed);
+                    if (uncompressedLength != length) {
+                        System.err.println("Uncompressed length is incorrect (" + uncompressedLength + " actual vs. " + length +")");
+                        uncompressed = Utils.resize(uncompressed, uncompressedLength);
+                        if (uncompressedLength > length) {
+                            inflater.inflate(uncompressed, length, uncompressedLength - length);
+                        }
+                    }
+                } catch (DataFormatException e) {
+                    throw new IOException(e);
+                }
+                return uncompressed;
+            }
+        }
+        return compressedBuffer;
     }
 
     @Nullable
@@ -103,15 +111,21 @@ public class Replay extends ReplayContext implements AutoCloseable {
     }
 
     public void readUntil(long endTimeCode, Consumer<Event> callback) throws IOException {
+        while (!buffered.isEmpty()) {
+            Event e = buffered.peek();
+            if (e.timecode > endTimeCode) return;
+            onEvent(e);
+            callback.accept(buffered.remove());
+        }
         while (true) {
-            long offset = file.getFilePointer();
             Event e = readEvent0();
             if (e == null) return;
             if (e.timecode <= endTimeCode) {
                 onEvent(e);
                 callback.accept(e);
             } else {
-                file.seek(offset);
+                buffered.add(e);
+                System.out.println("Buffered " + e);
                 return;
             }
         }
@@ -156,8 +170,9 @@ public class Replay extends ReplayContext implements AutoCloseable {
     public static void main(String[] args) throws IOException {
         Bootstrap.initialize();
         // Replay replay = new Replay(new RandomAccessFile(new File("recordings/2019-12-24_12-14-36.tnr"), "r"));
-        Replay replay = new Replay(new File("recordings/2019-12-24_11-43-28.tnr"), "r");
-        while (replay.hasNext()) {
+        Replay replay = new Replay(new File("recordings/2020-02-23_16-05-30.tnr"), "r");
+        int i = 0;
+        while (replay.hasNext() && i++ < 100) {
             System.out.println(replay.readEvent());
         }
     }

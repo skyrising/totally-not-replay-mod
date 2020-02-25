@@ -34,4 +34,9 @@ public class MetadataEvent extends Event {
     public void write(PacketByteBuf buf) throws IOException {
         buf.writeString(GSON.toJson(data));
     }
+
+    @Override
+    public String toString() {
+        return "MetadataEvent{" + "data=" + data + ", timecode=" + timecode + '}';
+    }
 }

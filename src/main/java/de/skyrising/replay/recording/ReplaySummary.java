@@ -24,7 +24,7 @@ public class ReplaySummary {
 
     public void load() {
         try {
-            new Replay(file, "rw").load();
+            new Replay(file, "r").load();
         } catch (IOException e) {
             Utils.onError(e);
         }
